@@ -1,66 +1,89 @@
--- 名称
-name = "DPSInfo / DPS统计"
--- 版本
-version = "1.2"
--- 描述
-description = "ver " .. version .. [[
+-- Version
+version = "1.2_00"
+-- Name
+name = "DPS/DMG Statistics v" .. version
+-- Description
+description = [[
+ 
+Damage Per Second & Total Damage Statistics
+(only apply to Epic Bosses)
 
-DPS 统计功能
+Translated & Modified for persional use.
 
-p.s. 应急处理一下妥协的报错，给服务器用
-p.s. 本mod功能可以关闭
+Original mod: [ DPSInfo/ DPS统计 ] by [ 胜天一猫 ]
+https://steamcommunity.com/sharedfiles/filedetails/?id=3304784351
 
 ]]
--- 作者
-author = "胜天一猫"
--- klei官方论坛地址，为空则默认是工坊的地址
+-- Author
+author = "胜天一猫 | Modified by VanCa"
+-- Klei official forum address, defaults to the workshop address if empty
 forumthread = ""
--- modicon 下一篇再介绍怎么创建的
+-- Modicon, will introduce how to create it in the next article
 icon_atlas = "modicon.xml"
 icon = "modicon.tex"
--- dst兼容
+-- DST compatible
 dst_compatible = true
--- 是否是客户端mod
+-- Is this a client-side mod
 client_only_mod = false
--- 是否是所有客户端都需要安装
+-- Does every client need to install this mod
 all_clients_require_mod = true
--- 饥荒api版本，固定填10
+-- Hunger Games API version, fixed at 10
 api_version = 10
 priority = 1000
 
--- mod的配置项，后面介绍
+-- Mod configuration options, will be introduced later
 configuration_options = {
     {
         name = "func_open",
-        label = "开关",
-        hover = "功能总开关",
+        label = "Main switch",
+        hover = "Turn this mod on or off",
         options = {
-            {data = "open", description = "打开/open"},
-            {data = "close", description = "关闭/close"},
+            {data = "open", description = "On"},
+            {data = "close", description = "Off"},
         },
         default = "open",
     },
     {
         name = "dps_offset",
-        label = "偏移",
-        hover = "伤害统计偏移位置",
+        label = "Statistics position in combat",
+        hover = "DPS statistics offset position while in combat",
         options = {
-            {data = "middle", description = "中间/middle"},
-            {data = "right", description = "左右/right"},
-            {data = "up", description = "上下/up"},
-            {data = "no", description = "无/no"},
+            {data = "head", description = "Boss's head"},
+            {data = "left_right", description = "Boss's left/right"},
+            {data = "under", description = "Under boss"},
+            {data = "no", description = "None"},
         },
-        default = "right",
+        default = "no",
     },
     {
         name = "dps_end",
-        label = "死后宣告",
-        hover = "是否在击杀后显示总结统计",
+        label = "Statistics after boss dead",
+        hover = "Whether to display summary statistics after boss dead",
         options = {
-            {data = "near", description = "附近"},
-            {data = "all", description = "全局"},
-            {data = "no", description = "否"},
+            {data = "near", description = "Nearby players"},
+            {data = "all", description = "Global"},
+            {data = "no", description = "No"},
         },
         default = "near",
     },
+    {
+        name = "dps_players_only",
+        label = "Top attackers are",
+        hover = "Whether to display mobs/fire's damage in top attackers list",
+        options = {
+            {data = true, description = "Players only"},
+            {data = false, description = "All factors"}
+        },
+        default = false,
+    },
+    {
+        name = "enable_debug_mode",
+        label = "Debug mode",
+        hover = "Whether to write debug logs",
+        options = {
+            {data = true, description = "On"},
+            {data = false, description = "Off"}
+        },
+        default = false,
+    }
 }
