@@ -83,7 +83,7 @@ local TOP_DPS_MAX_ENTRY = 4
 local dps_say_open = GetModConfigData("dps_offset") ~= "no"
 
 local SAY = function(guid, name, label)
-    print("rpc say ", guid, name, label)
+    print("rpc say ", guid, "\n", name, label)
     local ent = Ents[guid]
     GLOBAL.Networking_Say(guid, -1, name, ent, label, {0.196, 0.804, 0.196, 1}, false, "none")
 end
@@ -171,10 +171,22 @@ end
 local function OnDeathSay(inst, data)
     -- print("OnDeathSay", tostring(inst) .. " dead")
     if inst:HasTag("epic") then
+        DebugPrint("OnDeathSay", tostring(inst))
+
         local bossName = "---------------------\n【 " .. inst:GetDisplayName() .. " 】"
-        if data.afflicter and data.afflicter.HasTag then
-            bossName = bossName .. " has been killed by 【 " .. data.afflicter:GetDisplayName() .. " 】"
+
+        local killer
+        if data.afflicter then
+            killer = data.afflicter:GetDisplayName()
+        else
+            killer = CapitalizeFirstChar(data.cause)
         end
+        if inst.stillAlive then
+            bossName = bossName .. " has been defeated by 【 " .. killer .. " 】"
+        else
+            bossName = bossName .. " has been killed by 【 " .. killer .. " 】"
+        end
+
         bossName = bossName .. "\n---------------------"
 
         -- Update damage display logic
@@ -230,6 +242,7 @@ end
 
 local function OnAttacked(inst, data)
     if inst:HasTag("epic") then
+        DebugPrint("OnAttacked", tostring(inst))
         -- print("OnAttacked")
         if not data.damage or data.damage == 0 then
             return
@@ -269,30 +282,35 @@ function CapitalizeFirstChar(str)
 end
 
 local function OnHealthDelta(inst, data)
-    DebugPrint("data:", data)
-    if inst:HasTag("epic") and data.cause == "fire" then
+    if inst:HasTag("epic") and not data.afflicter then
+        DebugPrint("OnHealthDelta", tostring(inst))
         if not data.amount or data.amount == 0 then
             return
         end
         -- local damageAmount = math.abs(data.amount)
-        -- If the fire heal the boss (?), then decrease its damage
         local damageAmount = data.amount
 
-        if TUNING.DPS_PLAYERS_ONLY then
+        if TUNING.DPS_PLAYERS_ONLY and damageAmount < 0 then
             inst.unknownDamage = inst.unknownDamage - damageAmount
         else
             local sourceName = CapitalizeFirstChar(data.cause)
-            inst.playerDamage[sourceName] = (inst.playerDamage[sourceName] or 0) - damageAmount
-            inst.playerStartTime[sourceName] = inst.playerStartTime[sourceName] or GetTime()
+            -- Exclude regen
+            -- If the fire heal the boss (?), then decrease its damage
+            if inst.playerDamage[sourceName] or damageAmount < 0 then
+                inst.playerDamage[sourceName] = (inst.playerDamage[sourceName] or 0) - damageAmount
+                inst.playerStartTime[sourceName] = inst.playerStartTime[sourceName] or GetTime()
+            else
+                return
+            end
         end
 
         -- Add to total damage
-        inst.totalDamage = inst.totalDamage + damageAmount
+        inst.totalDamage = inst.totalDamage - damageAmount
 
         -- Update damage display logic
         local labelText = GenerateDamageReport(inst)
 
-        if inst.components.talker then
+        if dps_say_open and inst.components.talker then
             inst.components.talker:Say(labelText, 60)
         end
         if inst.deadMsg then
@@ -304,8 +322,18 @@ end
 
 local function OnDeath(inst, data)
     if inst:HasTag("epic") then
-        -- print("OnDeath")
+        DebugPrint("OnDeath", tostring(inst))
         inst.deadMsg = data
+        inst:RemoveEventCallback("death", OnDeath)
+    end
+end
+
+local function OnMinHealth(inst, data)
+    if inst:HasTag("epic") and inst.components.health.minhealth > 0 then
+        DebugPrint("OnMinHealth", tostring(inst))
+        inst.deadMsg = data
+        inst.stillAlive = true
+        inst:RemoveEventCallback("minhealth", OnMinHealth)
     end
 end
 
@@ -340,6 +368,7 @@ AddPrefabPostInitAny(
             if GetModConfigData("dps_end") ~= "no" then
                 -- print("listen death")
                 inst:ListenForEvent("death", OnDeath)
+                inst:ListenForEvent("minhealth", OnMinHealth)
             end
         end
     end
