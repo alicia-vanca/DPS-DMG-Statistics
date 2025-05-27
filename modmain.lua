@@ -61,7 +61,28 @@ local DebugPrint = TUNING.DEBUG_MODE and function(...)
         if arg.n > 1 then
             msg = msg .. "\n"
         end
-        print(msg)
+
+        if #msg > 3900 then
+            local chunks = {}
+            local remaining = msg
+            while #remaining > 3900 do
+                local chunk = remaining:sub(1, 3900)
+                local last_newline = chunk:find("\n[^\n]*$")
+                if last_newline then
+                    table.insert(chunks, chunk:sub(1, last_newline - 1))
+                    remaining = remaining:sub(last_newline)
+                else
+                    table.insert(chunks, chunk)
+                    remaining = remaining:sub(3901)
+                end
+            end
+            table.insert(chunks, remaining)
+            for _, chunk in ipairs(chunks) do
+                print(chunk)
+            end
+        else
+            print(msg)
+        end
     end or function()
     end
 
@@ -73,6 +94,31 @@ GLOBAL.setmetatable(
         end
     }
 )
+
+function GetOwner(inst, forceGetOwner)
+    if forceGetOwner or not GetModConfigData("separate_follower_dmg") then
+        if inst.owner then
+            inst = inst.owner
+        elseif inst.components.follower and inst.components.follower.leader then
+            inst = inst.components.follower.leader
+        elseif inst._playerlink then
+            inst = inst._playerlink
+        end
+    end
+    return inst
+end
+
+function GetDisplayName(inst)
+    local displayName = inst:GetDisplayName()
+    if inst:HasTag("player") then
+        -- Don't return the prefab of the player who's named "MISSING NAME"
+        return displayName
+    end
+    if not displayName or displayName == "MISSING NAME" then
+        displayName = inst.prefab
+    end
+    return displayName
+end
 
 if GetModConfigData("func_open") ~= "open" then
     return
@@ -90,22 +136,22 @@ end
 AddClientModRPCHandler("DPSINFO", "SAY", SAY)
 
 local function GenerateDamageReport(inst)
-    inst.sortedPlayerDamage = {}
+    inst.sortedSourceDamage = {}
     local current_time = GetTime()
 
-    -- Sort players by damage
-    for playerName, damage in pairs(inst.playerDamage) do
+    -- Sort sources by damage
+    for playerName, damage in pairs(inst.damageSources) do
         table.insert(
-            inst.sortedPlayerDamage,
+            inst.sortedSourceDamage,
             {
                 name = playerName,
                 damage = damage,
-                dps = damage / math.max(1, current_time - inst.playerStartTime[playerName])
+                dps = damage / math.max(1, current_time - inst.startDamagingTime[playerName])
             }
         )
     end
     table.sort(
-        inst.sortedPlayerDamage,
+        inst.sortedSourceDamage,
         function(a, b)
             return a.damage > b.damage
         end
@@ -113,16 +159,16 @@ local function GenerateDamageReport(inst)
 
     -- Generate player damage text
     local playerDamageText = {}
-    for i = 1, math.min(TOP_DPS_MAX_ENTRY, #inst.sortedPlayerDamage) do
+    for i = 1, math.min(TOP_DPS_MAX_ENTRY, #inst.sortedSourceDamage) do
         table.insert(
             playerDamageText,
             string.format(
                 "%d. %-10s:   %6d dmg (%.2f%%)   %6.2f dps",
                 i,
-                inst.sortedPlayerDamage[i].name,
-                inst.sortedPlayerDamage[i].damage,
-                inst.sortedPlayerDamage[i].damage / inst.totalDamage * 100,
-                inst.sortedPlayerDamage[i].dps
+                inst.sortedSourceDamage[i].name,
+                inst.sortedSourceDamage[i].damage,
+                inst.sortedSourceDamage[i].damage / inst.totalDamage * 100,
+                inst.sortedSourceDamage[i].dps
             )
         )
     end
@@ -156,7 +202,7 @@ local function SplitTextIntoChunks(text)
 
     -- First split by newlines
     for _, line in ipairs(labelLines) do
-        -- Then split lines that are still too long
+        -- then split lines that are still too long
         local start = 1
         while start <= #line do
             local chunk = line:sub(start, start + maxLength - 1)
@@ -173,11 +219,15 @@ local function OnDeathSay(inst, data)
     if inst:HasTag("epic") then
         DebugPrint("OnDeathSay", tostring(inst))
 
-        local bossName = "---------------------\n【 " .. inst:GetDisplayName() .. " 】"
+        local bossName = "---------------------\n【 " .. GetDisplayName(inst) .. " 】"
 
         local killer
         if data.afflicter then
-            killer = data.afflicter:GetDisplayName()
+            killer = GetDisplayName(data.afflicter)
+            killerOwner = GetDisplayName(GetOwner(data.afflicter, true))
+            if killer ~= killerOwner then
+                killer = killer .. " of " .. killerOwner
+            end
         else
             killer = CapitalizeFirstChar(data.cause)
         end
@@ -202,8 +252,8 @@ local function OnDeathSay(inst, data)
         for index, player in ipairs(AllPlayers) do
             if player and player:IsValid() and player.userid then
                 -- print("check", tostring(player))
-                local playerName = player:GetDisplayName()
-                if not near or player:GetDistanceSqToPoint(x, y, z) < 3600 or inst.playerDamage[playerName] ~= nil then
+                local playerName = GetDisplayName(player)
+                if not near or player:GetDistanceSqToPoint(x, y, z) < 3600 or inst.damageSources[playerName] ~= nil then
                     -- print("send", tostring(player), player:GetDistanceSqToPoint(x, y, z))
 
                     SendModRPCToClient(rpc, player.userid, inst.GUID, bossName, "")
@@ -211,9 +261,9 @@ local function OnDeathSay(inst, data)
                         SendModRPCToClient(rpc, player.userid, inst.GUID, " ", chunk)
                     end
                     -- Add dps info for players who wasn't in the top
-                    if inst.playerDamage[playerName] then
-                        for i = 1, #inst.sortedPlayerDamage do
-                            if inst.sortedPlayerDamage[i].name == playerName then
+                    if inst.damageSources[playerName] then
+                        for i = 1, #inst.sortedSourceDamage do
+                            if inst.sortedSourceDamage[i].name == playerName then
                                 if i > TOP_DPS_MAX_ENTRY then
                                     SendModRPCToClient(
                                         rpc,
@@ -224,9 +274,9 @@ local function OnDeathSay(inst, data)
                                             "(top %d) %s:   %6d dmg (%.2f%%)   %6.2f dps",
                                             i,
                                             playerName,
-                                            inst.sortedPlayerDamage[i].damage,
-                                            inst.sortedPlayerDamage[i].damage / inst.totalDamage * 100,
-                                            inst.sortedPlayerDamage[i].dps
+                                            inst.sortedSourceDamage[i].damage,
+                                            inst.sortedSourceDamage[i].damage / inst.totalDamage * 100,
+                                            inst.sortedSourceDamage[i].dps
                                         )
                                     )
                                 end
@@ -242,7 +292,7 @@ end
 
 local function OnAttacked(inst, data)
     if inst:HasTag("epic") then
-        DebugPrint("OnAttacked", tostring(inst))
+        DebugPrint("OnAttacked:", tostring(inst), "attacker:", tostring(data.attacker))
         -- print("OnAttacked")
         if not data.damage or data.damage == 0 then
             return
@@ -251,9 +301,10 @@ local function OnAttacked(inst, data)
         local damageAmount = data.damage
 
         if TUNING.DPS_PLAYERS_ONLY and data.attacker:HasTag("player") or not TUNING.DPS_PLAYERS_ONLY then
-            local playerName = data.attacker:GetDisplayName()
-            inst.playerDamage[playerName] = (inst.playerDamage[playerName] or 0) + damageAmount
-            inst.playerStartTime[playerName] = inst.playerStartTime[playerName] or GetTime()
+            local before = data.attacker.name
+            local dmgSourceName = GetDisplayName(GetOwner(data.attacker))
+            inst.damageSources[dmgSourceName] = (inst.damageSources[dmgSourceName] or 0) + damageAmount
+            inst.startDamagingTime[dmgSourceName] = inst.startDamagingTime[dmgSourceName] or GetTime()
         else
             inst.unknownDamage = inst.unknownDamage + damageAmount
         end
@@ -283,7 +334,7 @@ end
 
 local function OnHealthDelta(inst, data)
     if inst:HasTag("epic") and not data.afflicter then
-        DebugPrint("OnHealthDelta", tostring(inst))
+        DebugPrint("OnHealthDelta:", tostring(inst), "cause:", data.cause)
         if not data.amount or data.amount == 0 then
             return
         end
@@ -293,12 +344,12 @@ local function OnHealthDelta(inst, data)
         if TUNING.DPS_PLAYERS_ONLY and damageAmount < 0 then
             inst.unknownDamage = inst.unknownDamage - damageAmount
         else
-            local sourceName = CapitalizeFirstChar(data.cause)
+            local dmgSourceName = CapitalizeFirstChar(data.cause)
             -- Exclude regen
             -- If the fire heal the boss (?), then decrease its damage
-            if inst.playerDamage[sourceName] or damageAmount < 0 then
-                inst.playerDamage[sourceName] = (inst.playerDamage[sourceName] or 0) - damageAmount
-                inst.playerStartTime[sourceName] = inst.playerStartTime[sourceName] or GetTime()
+            if inst.damageSources[dmgSourceName] or damageAmount < 0 then
+                inst.damageSources[dmgSourceName] = (inst.damageSources[dmgSourceName] or 0) - damageAmount
+                inst.startDamagingTime[dmgSourceName] = inst.startDamagingTime[dmgSourceName] or GetTime()
             else
                 return
             end
@@ -329,7 +380,7 @@ local function OnDeath(inst, data)
 end
 
 local function OnMinHealth(inst, data)
-    if inst:HasTag("epic") and inst.components.health.minhealth > 0 then
+    if inst:HasTag("epic") and inst.components.health.minhealth > 0 and (inst.defeated == nil or inst.defeated) then
         DebugPrint("OnMinHealth", tostring(inst))
         inst.deadMsg = data
         inst.stillAlive = true
@@ -359,8 +410,8 @@ AddPrefabPostInitAny(
             -- print("AddPrefabPostInitAny")
 
             inst.totalDamage = 0
-            inst.playerDamage = inst.playerDamage or {}
-            inst.playerStartTime = inst.playerStartTime or {}
+            inst.damageSources = inst.damageSources or {}
+            inst.startDamagingTime = inst.startDamagingTime or {}
             inst.unknownDamage = 0
 
             inst:ListenForEvent("attacked", OnAttacked)
