@@ -1,5 +1,5 @@
 -- Version
-version = "1.2.01"
+version = "1.2.02"
 -- Name
 name = "DPS/DMG Statistics v" .. version
 -- Description
@@ -51,7 +51,7 @@ configuration_options = {
             {data = "head", description = "Boss's head"},
             {data = "left_right", description = "Boss's left/right"},
             {data = "under", description = "Under boss"},
-            {data = "no", description = "None"},
+            {data = "no", description = "Hide"},
         },
         default = "no",
     },
@@ -67,12 +67,22 @@ configuration_options = {
         default = "near",
     },
     {
+        name = "separate_follower_dmg",
+        label = "Follower's damage",
+        hover = "Whether to track dmg from Abigail, Merm, Crown,... separately\nor include it in the owner player's total dmg",
+        options = {
+            {data = true, description = "Track separately"},
+            {data = false, description = "Count toward owner's dmg"}
+        },
+        default = false,
+    },
+    {
         name = "dps_players_only",
-        label = "Top attackers are",
-        hover = "Whether to display mobs/fire's damage in top attackers list",
+        label = "Top attackers include",
+        hover = "Whether the top damage list should show only players or include creatures, followers, and other effects (e.g., fire)",
         options = {
             {data = true, description = "Players only"},
-            {data = false, description = "All factors"}
+            {data = false, description = "All dmg sources"}
         },
         default = false,
     },
