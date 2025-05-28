@@ -326,15 +326,15 @@ local function OnAttacked(inst, data)
 end
 
 function CapitalizeFirstChar(str)
-    if str == "" or str == nil then
-        return str
+    if not str or str == "" then
+        return "Unknown"
     end -- Handle empty strings
     return str:sub(1, 1):upper() .. str:sub(2)
 end
 
 local function OnHealthDelta(inst, data)
-    if inst:HasTag("epic") and not data.afflicter then
-        DebugPrint("OnHealthDelta:", tostring(inst), "cause:", data.cause)
+    if inst:HasTag("epic") and data.cause and not data.afflicter then
+        DebugPrint("OnHealthDelta:", tostring(inst), "cause:", data.cause, data.amount)
         if not data.amount or data.amount == 0 then
             return
         end
