@@ -1,5 +1,5 @@
 -- Version
-version = "1.2.02"
+version = "1.2.03"
 -- Name
 name = "DPS/DMG Statistics v" .. version
 -- Description

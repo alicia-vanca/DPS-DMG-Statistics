@@ -326,7 +326,7 @@ local function OnAttacked(inst, data)
 end
 
 function CapitalizeFirstChar(str)
-    if str == "" then
+    if str == "" or str == nil then
         return str
     end -- Handle empty strings
     return str:sub(1, 1):upper() .. str:sub(2)
