@@ -1,5 +1,5 @@
 -- Version
-version = "1.2.04"
+version = "1.2.05"
 -- Name
 name = "DPS/DMG Statistics v" .. version
 -- Description
@@ -10,8 +10,7 @@ Damage Per Second & Total Damage Statistics
 
 Translated & Modified for persional use.
 
-Original mod: [ DPSInfo/ DPS统计 ] by [ 胜天一猫 ]
-https://steamcommunity.com/sharedfiles/filedetails/?id=3304784351
+Original mod: [ DPSInfo/ DPS统计 ] by [ 胜天一猫 ] (id 3304784351)
 
 ]]
 -- Author
@@ -85,6 +84,16 @@ configuration_options = {
             {data = false, description = "All dmg sources"}
         },
         default = false,
+    },
+    {
+        name = "dummy_dps",
+        label = "Track dummy dps",
+        hover = "Track dps while attacking Punching Bag / Boxer / Dummy",
+        options = {
+            {data = true, description = "On"},
+            {data = false, description = "Off"}
+        },
+        default = true,
     },
     {
         name = "enable_debug_mode",

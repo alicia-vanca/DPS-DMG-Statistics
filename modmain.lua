@@ -1,5 +1,8 @@
 TUNING.DEBUG_MODE = GetModConfigData("enable_debug_mode")
 TUNING.DPS_PLAYERS_ONLY = GetModConfigData("dps_players_only")
+TUNING.DUMMY_DPS = GetModConfigData("dummy_dps")
+TUNING.IS_DPS_SAY = GetModConfigData("dps_offset") ~= "no"
+TUNING.DPS_SAY_POSITION = GetModConfigData("dps_offset")
 
 function table_print(tt, indent, done)
     done = done or {}
@@ -126,79 +129,140 @@ end
 
 local TOP_DPS_MAX_ENTRY = 4
 
-local dps_say_open = GetModConfigData("dps_offset") ~= "no"
-
 local SAY = function(guid, name, label)
-    print("rpc say ", guid, "\n", name, label)
     local ent = Ents[guid]
+    DebugPrint("rpc say ", tostring(ent), "\n", name, label)
     GLOBAL.Networking_Say(guid, -1, name, ent, label, {0.196, 0.804, 0.196, 1}, false, "none")
 end
 AddClientModRPCHandler("DPSINFO", "SAY", SAY)
 
-local function GenerateDamageReport(inst)
-    inst.sortedSourceDamage = {}
-    local current_time = GetTime()
+local SHOW_DUMMY_DPS_INFO = function(ent, label)
+    -- local ent = Ents[guid]
+    DebugPrint("rpc SHOW_DUMMY_DPS_INFO ", tostring(ent), "\n", label)
+    ent.components.talker:Say(label, 5)
+end
+AddClientModRPCHandler("DPSINFO", "SHOW_DUMMY_DPS_INFO", SHOW_DUMMY_DPS_INFO)
 
-    -- Sort sources by damage
-    for playerName, damage in pairs(inst.damageSources) do
-        table.insert(
-            inst.sortedSourceDamage,
-            {
-                name = playerName,
-                damage = damage,
-                dps = damage / math.max(1, current_time - inst.startDamagingTime[playerName])
-            }
-        )
-    end
-    table.sort(
-        inst.sortedSourceDamage,
-        function(a, b)
-            return a.damage > b.damage
-        end
-    )
+local function GenerateDamageReport(inst, playerName)
+    if not playerName then
+        -- Boss damage statistics
+        inst.sortedSourceDamage = {}
+        local current_time = GetTime()
 
-    -- Generate player damage text
-    local playerDamageText = {}
-    for i = 1, math.min(TOP_DPS_MAX_ENTRY, #inst.sortedSourceDamage) do
-        table.insert(
-            playerDamageText,
-            string.format(
-                "%d. %-10s:   %6d dmg (%.2f%%)   %6.2f dps",
-                i,
-                inst.sortedSourceDamage[i].name,
-                inst.sortedSourceDamage[i].damage,
-                inst.sortedSourceDamage[i].damage / inst.totalDamage * 100,
-                inst.sortedSourceDamage[i].dps
+        -- Sort sources by damage
+        for sourceName, damage in pairs(inst.damageSources) do
+            table.insert(
+                inst.sortedSourceDamage,
+                {
+                    name = sourceName,
+                    damage = damage,
+                    dps = damage / math.max(1, current_time - inst.startDamagingTime[sourceName])
+                }
             )
+        end
+        table.sort(
+            inst.sortedSourceDamage,
+            function(a, b)
+                return a.damage > b.damage
+            end
         )
-    end
 
-    -- Create base label text
-    local labelText = string.format("------ Total: %d dmg ------", inst.totalDamage)
+        -- Create base label text
+        local labelText = string.format("------ Total: %d dmg ------", inst.totalDamage)
 
-    if #playerDamageText ~= 0 then
-        labelText = string.format("%s\n%s", labelText, table.concat(playerDamageText, "\n"))
-    end
-    if inst.unknownDamage ~= 0 then
-        labelText =
-            string.format(
-            "%s\nOther sources:   %6d dmg (%.2f%%)",
-            labelText,
-            inst.unknownDamage,
-            inst.unknownDamage / inst.totalDamage * 100
+        -- Generate sources damage text
+        local sourcesDamageText = {}
+        for i = 1, math.min(TOP_DPS_MAX_ENTRY, #inst.sortedSourceDamage) do
+            table.insert(
+                sourcesDamageText,
+                string.format(
+                    "%d. %-10s:  %5d dmg (%.2f%%)  %7.2f dps",
+                    i,
+                    inst.sortedSourceDamage[i].name,
+                    inst.sortedSourceDamage[i].damage,
+                    inst.sortedSourceDamage[i].damage / inst.totalDamage * 100,
+                    inst.sortedSourceDamage[i].dps
+                )
+            )
+        end
+
+        if #sourcesDamageText ~= 0 then
+            labelText = string.format("%s\n%s", labelText, table.concat(sourcesDamageText, "\n"))
+        end
+        if inst.unknownDamage ~= 0 then
+            labelText =
+                string.format(
+                "%s\nOther sources:  %5d dmg (%.2f%%)",
+                labelText,
+                inst.unknownDamage,
+                inst.unknownDamage / inst.totalDamage * 100
+            )
+        end
+
+        return labelText
+    else
+        -- Dummy dps
+        local sortedSourceDamage = {}
+        local current_time = GetTime()
+
+        -- Sort sources by damage
+        for sourceName, info in pairs(inst.damageSources[playerName]) do
+            table.insert(
+                sortedSourceDamage,
+                {
+                    name = sourceName,
+                    damage = info.damage,
+                    dps = info.damage / math.max(1, current_time - info.startDamagingTime)
+                }
+            )
+        end
+        table.sort(
+            sortedSourceDamage,
+            function(a, b)
+                return a.damage > b.damage
+            end
         )
-    end
 
-    return labelText
+        -- Create base label text
+        local totalDamage = inst.totalDamage[playerName]
+        local totalDps = totalDamage / math.max(1, current_time - inst.startDamagingTime[playerName])
+        local labelText = string.format("【  Total:  %4d dmg  %6.2f dps  】", totalDamage, totalDps)
+
+        if #sortedSourceDamage > 1 then
+            -- Generate sources damage text
+            local sourcesDamageText = {}
+            for i = 1, #sortedSourceDamage do
+                table.insert(
+                    sourcesDamageText,
+                    string.format(
+                        "%d. %s:  %4d dmg (%.2f%%)  %6.2f dps",
+                        i,
+                        sortedSourceDamage[i].name,
+                        sortedSourceDamage[i].damage,
+                        sortedSourceDamage[i].damage / totalDamage * 100,
+                        sortedSourceDamage[i].dps
+                    )
+                )
+            end
+
+            labelText = string.format("%s\n%s", labelText, table.concat(sourcesDamageText, "\n"))
+        end
+
+        return labelText
+    end
 end
 
-local function SplitTextIntoChunks(text)
+local function SplitTextIntoChunks(text, removeFirstLine)
     local chunks = {}
     local maxLength = 150
 
     -- Split into lines and remove the first one
     local labelLines = text:split("\n")
-    table.remove(labelLines, 1) -- Remove first line
+
+    if removeFirstLine then
+        -- Remove the Total dmg line when generating Boss damage statistics
+        table.remove(labelLines, 1)
+    end
 
     -- First split by newlines
     for _, line in ipairs(labelLines) do
@@ -241,7 +305,7 @@ local function OnDeathSay(inst, data)
 
         -- Update damage display logic
         local labelText = GenerateDamageReport(inst)
-        local chunks = SplitTextIntoChunks(labelText)
+        local chunks = SplitTextIntoChunks(labelText, true)
 
         -- print(labelText)
         -- GLOBAL.Networking_Say(inst.GUID, -1, inst:GetDisplayName(), inst, labelText, {0.196, 0.804, 0.196, 1}, GetModConfigData("dps_end") == "near", "none")
@@ -290,38 +354,94 @@ local function OnDeathSay(inst, data)
     end
 end
 
-local function OnAttacked(inst, data)
-    if inst:HasTag("epic") then
-        DebugPrint("OnAttacked:", tostring(inst), "attacker:", tostring(data.attacker))
-        -- print("OnAttacked")
-        if not data.damage or data.damage == 0 then
-            return
-        end
+local function OnBossAttacked(inst, data)
+    DebugPrint("OnBossAttacked:", tostring(inst), "attacker:", tostring(data.attacker))
+    -- print("OnAttacked")
+    if not data.damage or data.damage == 0 then
+        return
+    end
 
+    local damageAmount = data.damage
+
+    if TUNING.DPS_PLAYERS_ONLY and data.attacker:HasTag("player") or not TUNING.DPS_PLAYERS_ONLY then
+        local before = data.attacker.name
+        local dmgSourceName = GetDisplayName(GetOwner(data.attacker))
+        inst.damageSources[dmgSourceName] = (inst.damageSources[dmgSourceName] or 0) + damageAmount
+        inst.startDamagingTime[dmgSourceName] = inst.startDamagingTime[dmgSourceName] or GetTime()
+    else
+        inst.unknownDamage = inst.unknownDamage + damageAmount
+    end
+    -- Add to total damage
+    inst.totalDamage = inst.totalDamage + damageAmount
+
+    -- Update damage display logic
+    local labelText = GenerateDamageReport(inst)
+
+    if TUNING.IS_DPS_SAY and inst.components.talker then
+        inst.components.talker:Say(labelText, 60)
+    end
+
+    if inst.deadMsg then
+        OnDeathSay(inst, inst.deadMsg)
+        inst.deadMsg = nil
+    end
+end
+
+local function ResetDpsTracker(inst)
+    DebugPrint("Reset dps tracker")
+    inst.totalDamage = {}
+    inst.damageSources = {}
+    inst.startDamagingTime = {}
+end
+
+local function OnDummyAttacked(inst, data)
+    DebugPrint("Dummy Dps data:", data)
+    if not data.damage or data.damage == 0 then
+        return
+    end
+
+    local dmgSourceOwner = GetOwner(data.attacker, true)
+    if dmgSourceOwner:HasTag("player") then
+        local dmgSourceOwnerName = GetDisplayName(dmgSourceOwner)
+        local dmgSourceName = GetDisplayName(data.attacker)
         local damageAmount = data.damage
+        local current_time = GetTime()
+        local damageSourcesOfThePlayer = inst.damageSources[dmgSourceOwnerName] or {}
 
-        if TUNING.DPS_PLAYERS_ONLY and data.attacker:HasTag("player") or not TUNING.DPS_PLAYERS_ONLY then
-            local before = data.attacker.name
-            local dmgSourceName = GetDisplayName(GetOwner(data.attacker))
-            inst.damageSources[dmgSourceName] = (inst.damageSources[dmgSourceName] or 0) + damageAmount
-            inst.startDamagingTime[dmgSourceName] = inst.startDamagingTime[dmgSourceName] or GetTime()
-        else
-            inst.unknownDamage = inst.unknownDamage + damageAmount
-        end
-        -- Add to total damage
-        inst.totalDamage = inst.totalDamage + damageAmount
-
-        -- Update damage display logic
-        local labelText = GenerateDamageReport(inst)
-
-        if dps_say_open and inst.components.talker then
-            inst.components.talker:Say(labelText, 60)
+        if inst.ResetDps[dmgSourceOwnerName] then
+            -- DebugPrint("Cancel reset DPS tracker")
+            inst.ResetDps[dmgSourceOwnerName]:Cancel()
+            inst.ResetDps[dmgSourceOwnerName] = nil
         end
 
-        if inst.deadMsg then
-            OnDeathSay(inst, inst.deadMsg)
-            inst.deadMsg = nil
-        end
+        -- The time when (the player or their followers) start damaging
+        inst.startDamagingTime[dmgSourceOwnerName] = inst.startDamagingTime[dmgSourceOwnerName] or current_time
+
+        -- Total damage of the player and their follower(s)
+        inst.totalDamage[dmgSourceOwnerName] = (inst.totalDamage[dmgSourceOwnerName] or 0) + damageAmount
+
+        -- Init damageSourcesOfThePlayer[dmgSourceName] as a table if it wasn't exist
+        damageSourcesOfThePlayer[dmgSourceName] =
+            damageSourcesOfThePlayer[dmgSourceName] or {damage = 0, startDamagingTime = current_time}
+
+        -- Update the total damage of this damage source
+        damageSourcesOfThePlayer[dmgSourceName].damage = damageSourcesOfThePlayer[dmgSourceName].damage + damageAmount
+
+        inst.damageSources[dmgSourceOwnerName] = damageSourcesOfThePlayer
+
+        local labelText = GenerateDamageReport(inst, dmgSourceOwnerName)
+
+        -- local chunks = SplitTextIntoChunks(labelText)
+        local rpc = GetClientModRPC("DPSINFO", "SHOW_DUMMY_DPS_INFO")
+        SendModRPCToClient(rpc, dmgSourceOwner.userid, inst, labelText)
+
+        inst.ResetDps[dmgSourceOwnerName] =
+            inst:DoTaskInTime(
+            5,
+            function(inst)
+                ResetDpsTracker(inst)
+            end
+        )
     end
 end
 
@@ -361,7 +481,7 @@ local function OnHealthDelta(inst, data)
         -- Update damage display logic
         local labelText = GenerateDamageReport(inst)
 
-        if dps_say_open and inst.components.talker then
+        if TUNING.IS_DPS_SAY and inst.components.talker then
             inst.components.talker:Say(labelText, 60)
         end
         if inst.deadMsg then
@@ -391,15 +511,15 @@ end
 local tbList = {
     head = Vector3(0, -1000, 0),
     left_right = Vector3(900, -700, 0),
-    under = Vector3(0, 700, 0)
+    under = Vector3(0, 400, 0)
 }
 
 AddPrefabPostInitAny(
     function(inst)
         if inst:HasTag("epic") then
-            if dps_say_open and not inst.components.talker then
+            if TUNING.IS_DPS_SAY and not inst.components.talker then
                 inst:AddComponent("talker")
-                inst.components.talker.offset = tbList[GetModConfigData("dps_offset")]
+                inst.components.talker.offset = tbList[TUNING.DPS_SAY_POSITION]
                 inst.components.talker.fontsize = 35
             end
 
@@ -414,13 +534,31 @@ AddPrefabPostInitAny(
             inst.startDamagingTime = inst.startDamagingTime or {}
             inst.unknownDamage = 0
 
-            inst:ListenForEvent("attacked", OnAttacked)
+            inst:ListenForEvent("attacked", OnBossAttacked)
             inst:ListenForEvent("healthdelta", OnHealthDelta)
             if GetModConfigData("dps_end") ~= "no" then
                 -- print("listen death")
                 inst:ListenForEvent("death", OnDeath)
                 inst:ListenForEvent("minhealth", OnMinHealth)
             end
+        elseif
+            TUNING.DUMMY_DPS and
+                table.contains({"punchingbag", "punchingbag_lunar", "punchingbag_shadow", "dummytarget"}, inst.prefab)
+         then
+            if not inst.components.talker then
+                inst:AddComponent("talker")
+                inst.components.talker.offset = Vector3(0, 200, 0) -- under the dummy
+                inst.components.talker.fontsize = 35
+            end
+
+            if not TheWorld.ismastersim then
+                return
+            end
+            inst.ResetDps = {}
+            inst.totalDamage = {}
+            inst.damageSources = inst.damageSources or {}
+            inst.startDamagingTime = inst.startDamagingTime or {}
+            inst:ListenForEvent("attacked", OnDummyAttacked)
         end
     end
 )
