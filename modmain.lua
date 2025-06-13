@@ -145,7 +145,7 @@ AddClientModRPCHandler("DPSINFO", "SHOW_DUMMY_DPS_INFO", SHOW_DUMMY_DPS_INFO)
 
 local function GenerateDamageReport(inst, playerName)
     if not playerName then
-        -- Boss damage statistics
+        DebugPrint("Create Boss damage statistics")
         inst.sortedSourceDamage = {}
         local current_time = GetTime()
 
@@ -201,7 +201,7 @@ local function GenerateDamageReport(inst, playerName)
 
         return labelText
     else
-        -- Dummy dps
+        DebugPrint("Create Dummy dps statistics")
         local sortedSourceDamage = {}
         local current_time = GetTime()
 
@@ -355,7 +355,7 @@ local function OnDeathSay(inst, data)
 end
 
 local function OnBossAttacked(inst, data)
-    DebugPrint("OnBossAttacked:", tostring(inst), "attacker:", tostring(data.attacker))
+    DebugPrint("OnBossAttacked:", tostring(inst), "attacker:", tostring(data.attacker), "damage:", data.damage)
     -- print("OnAttacked")
     if not data.damage or data.damage == 0 then
         return
@@ -364,7 +364,6 @@ local function OnBossAttacked(inst, data)
     local damageAmount = data.damage
 
     if TUNING.DPS_PLAYERS_ONLY and data.attacker:HasTag("player") or not TUNING.DPS_PLAYERS_ONLY then
-        local before = data.attacker.name
         local dmgSourceName = GetDisplayName(GetOwner(data.attacker))
         inst.damageSources[dmgSourceName] = (inst.damageSources[dmgSourceName] or 0) + damageAmount
         inst.startDamagingTime[dmgSourceName] = inst.startDamagingTime[dmgSourceName] or GetTime()
@@ -384,6 +383,11 @@ local function OnBossAttacked(inst, data)
     if inst.deadMsg then
         OnDeathSay(inst, inst.deadMsg)
         inst.deadMsg = nil
+        -- Reset statistics
+        inst.totalDamage = 0
+        inst.damageSources = {}
+        inst.startDamagingTime = {}
+        inst.unknownDamage = 0
     end
 end
 
@@ -408,10 +412,10 @@ local function OnDummyAttacked(inst, data)
         local current_time = GetTime()
         local damageSourcesOfThePlayer = inst.damageSources[dmgSourceOwnerName] or {}
 
-        if inst.ResetDps[dmgSourceOwnerName] then
+        if inst.ResetDpsTasks[dmgSourceOwnerName] then
             -- DebugPrint("Cancel reset DPS tracker")
-            inst.ResetDps[dmgSourceOwnerName]:Cancel()
-            inst.ResetDps[dmgSourceOwnerName] = nil
+            inst.ResetDpsTasks[dmgSourceOwnerName]:Cancel()
+            inst.ResetDpsTasks[dmgSourceOwnerName] = nil
         end
 
         -- The time when (the player or their followers) start damaging
@@ -435,7 +439,7 @@ local function OnDummyAttacked(inst, data)
         local rpc = GetClientModRPC("DPSINFO", "SHOW_DUMMY_DPS_INFO")
         SendModRPCToClient(rpc, dmgSourceOwner.userid, inst, labelText)
 
-        inst.ResetDps[dmgSourceOwnerName] =
+        inst.ResetDpsTasks[dmgSourceOwnerName] =
             inst:DoTaskInTime(
             5,
             function(inst)
@@ -487,6 +491,11 @@ local function OnHealthDelta(inst, data)
         if inst.deadMsg then
             OnDeathSay(inst, inst.deadMsg)
             inst.deadMsg = nil
+            -- Reset statistics
+            inst.totalDamage = 0
+            inst.damageSources = {}
+            inst.startDamagingTime = {}
+            inst.unknownDamage = 0
         end
     end
 end
@@ -495,12 +504,14 @@ local function OnDeath(inst, data)
     if inst:HasTag("epic") then
         DebugPrint("OnDeath", tostring(inst))
         inst.deadMsg = data
-        inst:RemoveEventCallback("death", OnDeath)
     end
 end
 
 local function OnMinHealth(inst, data)
-    if inst:HasTag("epic") and inst.components.health.minhealth > 0 and (inst.defeated == nil or inst.defeated) then
+    if
+        inst:HasTag("epic") and inst.components.health.minhealth and inst.components.health.minhealth > 0 and
+            (inst.defeated == nil or inst.defeated)
+     then
         DebugPrint("OnMinHealth", tostring(inst))
         inst.deadMsg = data
         inst.stillAlive = true
@@ -554,7 +565,7 @@ AddPrefabPostInitAny(
             if not TheWorld.ismastersim then
                 return
             end
-            inst.ResetDps = {}
+            inst.ResetDpsTasks = {}
             inst.totalDamage = {}
             inst.damageSources = inst.damageSources or {}
             inst.startDamagingTime = inst.startDamagingTime or {}
